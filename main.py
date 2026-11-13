@@ -4,12 +4,12 @@
 Reads every <id>.in case from $MAKEFUN_INPUT_DIR (default /input) and writes
 <id>.out to $MAKEFUN_OUTPUT_DIR (default /output). For each market it forecasts
 a random-walk spread around the checkpoint price, with the per-minute spread
-estimated from the last 360 one-minute changes:
+estimated from the last 120 one-minute changes:
 
-    sigma = min(0.005, max(0.00008, 0.4 * rms(d)))
+    sigma = min(0.005, max(0.0002, 0.55 * rms(d), 0.0025 * sqrt(p * (1 - p))))
     q_tau(h) = clamp(x + z_tau * sqrt(h) * sigma, 0, 1)
 
-rounded to 6 decimals. Python 3 standard library only, no network, no randomness.
+rounded to 6 decimals; the floor rises with the price level. Python 3 standard library only, no network, no randomness.
 """
 
 from __future__ import annotations
@@ -24,10 +24,11 @@ OUTPUT_DIR = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
 
 QUANTILES = [0.05, 0.25, 0.5, 0.75, 0.95]
 Z = [-1.644854, -0.674490, 0.0, 0.674490, 1.644854]
-MAX_CHANGES = 360
-SIGMA_FLOOR = 0.00008
+MAX_CHANGES = 120
+SIGMA_FLOOR = 0.0002
 SIGMA_CAP = 0.005
-RMS_SCALE = 0.4
+RMS_SCALE = 0.55
+PRICE_SCALE = 0.0025
 HORIZON_MINUTES = 240
 
 
@@ -59,7 +60,9 @@ def price_sigma(prices: list[float]) -> float:
         if math.isfinite(change):
             total += change * change
     rms = math.sqrt(total / width)
-    return min(SIGMA_CAP, max(SIGMA_FLOOR, RMS_SCALE * rms))
+    level = checkpoint_price(prices)
+    floor = max(SIGMA_FLOOR, PRICE_SCALE * math.sqrt(max(0.0, level * (1.0 - level))))
+    return min(SIGMA_CAP, max(floor, RMS_SCALE * rms))
 
 
 def forecast_market(prices: list[float], horizon: int) -> list[list[float]]:
